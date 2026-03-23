@@ -98,4 +98,4 @@ if uploaded_files:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Calcolo_Ore')
-    st.download_button("📥 Scarica Report Excel", output.getvalue(), "riepilogo_ore_massaro.xlsx")
+    st.download_button("📥 Scarica Report Excel", output.getvalue(), "riepilogo_ore.xlsx")
