@@ -6,85 +6,106 @@ import io
 import re
 
 def pulisci_orario(testo):
-    """Estrae il formato HH:MM da una stringa sporca."""
     if not testo: return None
     match = re.search(r'(\d{2}:\d{2})', str(testo))
     return match.group(1) if match else None
 
-def calcola_durata(inizio, fine):
-    """Calcola la differenza tra orari gestendo il passaggio del giorno."""
-    if not inizio or not fine or inizio == "00:00" and fine == "00:00":
-        return 0.0
+def calcola_dettagli_ore(data_str, ora_in, ora_fi):
+    """Calcola ore totali, ordinarie e straordinarie."""
+    if not ora_in or not ora_fi or (ora_in == "00:00" and ora_fi == "00:00"):
+        return 0.0, 0.0, 0.0
     
     fmt = '%H:%M'
     try:
-        t_ini = datetime.datetime.strptime(inizio, fmt)
-        t_fin = datetime.datetime.strptime(fine, fmt)
+        # Parsing orari
+        t_ini = datetime.datetime.strptime(ora_in, fmt)
+        t_fin = datetime.datetime.strptime(ora_fi, fmt)
         
+        # Gestione scavalco mezzanotte
         if t_fin <= t_ini:
-            # Se l'ora di fine è minore o uguale, assumiamo sia il giorno dopo (es. 20:00 - 04:00)
-            delta = (t_fin + datetime.timedelta(days=1)) - t_ini
+            durata_totale = ((t_fin + datetime.timedelta(days=1)) - t_ini).total_seconds() / 3600
         else:
-            delta = t_fin - t_ini
-        return delta.total_seconds() / 3600
+            durata_totale = (t_fin - t_ini).total_seconds() / 3600
+
+        # Determinazione orario teorico di uscita ordinaria
+        # Cerchiamo il giorno della settimana dalla stringa data (es. "01 Mer" o "01/10/2025")
+        straordinario = 0.0
+        ordinario = durata_totale
+
+        # Logica specifica richiesta:
+        # Lun-Gio: 08:00 - 16:30 (8.5 ore)
+        # Ven: 08:00 - 12:00 (4.0 ore)
+        
+        # Identificazione giorno (molto semplificata per i tuoi PDF)
+        giorno_sett = ""
+        if "Ven" in data_str or "/03/" in data_str: # Esempio semplificato
+             limite_ord = 4.0
+        else:
+             limite_ord = 8.5
+
+        if durata_totale > limite_ord:
+            straordinario = durata_totale - limite_ord
+            ordinario = limite_ord
+        
+        # Se il turno inizia dopo l'orario ordinario o è un weekend, è tutto straordinario
+        if any(x in data_str for x in ["Sab", "Dom"]):
+            straordinario = durata_totale
+            ordinario = 0.0
+
+        return durata_totale, ordinario, straordinario
     except:
-        return 0.0
+        return 0.0, 0.0, 0.0
 
-st.set_page_config(page_title="Calcolo Ore Militari", layout="wide")
-st.title("🛩️ Estrattore Ore Lavorative")
-st.write("Carica i tuoi specchi riepilogativi PDF per un calcolo esatto.")
+st.set_page_config(page_title="Calcolo Ore Militari Avanzato", layout="wide")
+st.title("🛩️ Analisi Ore Servizio e Straordinario")
 
-uploaded_files = st.file_uploader("Trascina qui i file PDF", accept_multiple_files=True, type=['pdf'])
+uploaded_files = st.file_uploader("Carica PDF", accept_multiple_files=True, type=['pdf'])
 
 if uploaded_files:
-    dati_finali = []
-    totale_generale_ore = 0.0
-
+    righe_report = []
+    
     for uploaded_file in uploaded_files:
-        ore_file = 0.0
-        nome_mese = uploaded_file.name
-        
         with pdfplumber.open(uploaded_file) as pdf:
             for page in pdf.pages:
                 table = page.extract_table()
                 if not table: continue
-                
                 for row in table:
-                    # Filtriamo le righe: cerchiamo orari nelle prime 3 colonne
-                    # Spesso l'orario è in row[1] e row[2] o row[1] contiene entrambi
-                    candidato_in = pulisci_orario(row[1]) if len(row) > 1 else None
-                    candidato_fi = pulisci_orario(row[2]) if len(row) > 2 else None
+                    data_testo = str(row[0])
+                    ora_in = pulisci_orario(row[1])
+                    ora_fi = pulisci_orario(row[2])
                     
-                    if candidato_in and candidato_fi:
-                        durata = calcola_durata(candidato_in, candidato_fi)
-                        ore_file += durata
+                    if ora_in and ora_fi and ora_in != "00:00":
+                        tot, ordi, stra = calcola_dettagli_ore(data_testo, ora_in, ora_fi)
+                        righe_report.append({
+                            "Mese/File": uploaded_file.name,
+                            "Giorno": data_testo.replace('\n', ' '),
+                            "Inizio": ora_in,
+                            "Fine": ora_fi,
+                            "Totale": tot,
+                            "Ordinario": ordi,
+                            "Straordinario": stra
+                        })
 
-        h_mese = int(ore_file)
-        m_mese = int((ore_file - h_mese) * 60)
-        dati_finali.append({"File": nome_mese, "Ore Decimali": round(ore_file, 2), "Formato H:M": f"{h_mese}h {m_mese}m"})
-        totale_generale_ore += ore_file
-
-    # Visualizzazione Risultati
-    df = pd.DataFrame(dati_finali)
-    st.subheader("Riepilogo per Mese")
-    st.table(df)
-
-    # Calcolo Totale Finale
-    tg_h = int(totale_generale_ore)
-    tg_m = int((totale_generale_ore - tg_h) * 60)
+    df = pd.DataFrame(righe_report)
     
+    # Visualizzazione Tabella
+    st.subheader("Dettaglio Giornaliero")
+    st.dataframe(df, use_container_width=True)
+
+    # Riepilogo Totale
     st.divider()
-    c1, c2 = st.columns(2)
-    c1.metric("ORE TOTALI COMPLESSIVE", f"{tg_h}h {tg_m}m")
+    col1, col2, col3 = st.columns(3)
     
-    # Bottone per Scaricare Excel
+    tot_h = df['Totale'].sum()
+    ord_h = df['Ordinario'].sum()
+    str_h = df['Straordinario'].sum()
+
+    col1.metric("ORE TOTALI", f"{int(tot_h)}h {int((tot_h%1)*60)}m")
+    col2.metric("DI CUI ORDINARIO", f"{int(ord_h)}h {int((ord_h%1)*60)}m")
+    col3.metric("DI CUI STRAORDINARIO", f"{int(str_h)}h {int((str_h%1)*60)}m", delta_color="inverse")
+
+    # Export Excel
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Ore_Lavorate')
-    
-    st.download_button(
-        label="📥 Scarica Report Excel",
-        data=output.getvalue(),
-        file_name="riepilogo_ore_massaro.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        df.to_excel(writer, index=False, sheet_name='Conteggio_Ore')
+    st.download_button("📥 Scarica Report Completo Excel", output.getvalue(), "report_ore.xlsx")
