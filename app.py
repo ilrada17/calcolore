@@ -2,13 +2,27 @@ import streamlit as st
 import pdfplumber
 import datetime
 import pandas as pd
+import io
+import re
+
+def pulisci_orario(testo):
+    """Estrae il formato HH:MM da una stringa sporca."""
+    if not testo: return None
+    match = re.search(r'(\d{2}:\d{2})', str(testo))
+    return match.group(1) if match else None
 
 def calcola_durata(inizio, fine):
+    """Calcola la differenza tra orari gestendo il passaggio del giorno."""
+    if not inizio or not fine or inizio == "00:00" and fine == "00:00":
+        return 0.0
+    
     fmt = '%H:%M'
     try:
         t_ini = datetime.datetime.strptime(inizio, fmt)
         t_fin = datetime.datetime.strptime(fine, fmt)
-        if t_fin <= t_ini and t_fin.hour < 12: # Gestione scavalco mezzanotte
+        
+        if t_fin <= t_ini:
+            # Se l'ora di fine è minore o uguale, assumiamo sia il giorno dopo (es. 20:00 - 04:00)
             delta = (t_fin + datetime.timedelta(days=1)) - t_ini
         else:
             delta = t_fin - t_ini
@@ -16,37 +30,61 @@ def calcola_durata(inizio, fine):
     except:
         return 0.0
 
-st.title("Estrattore Ore Lavorative AM")
-st.write("Carica i file PDF degli specchi riepilogativi per calcolare le ore mensili.")
+st.set_page_config(page_title="Calcolo Ore Militari", layout="wide")
+st.title("🛩️ Estrattore Ore Lavorative Massaro")
+st.write("Carica i tuoi specchi riepilogativi PDF per un calcolo esatto.")
 
-uploaded_files = st.file_uploader("Scegli i file PDF", accept_multiple_files=True, type=['pdf'])
+uploaded_files = st.file_uploader("Trascina qui i file PDF", accept_multiple_files=True, type=['pdf'])
 
 if uploaded_files:
-    totale_generale = 0.0
-    report_finale = []
+    dati_finali = []
+    totale_generale_ore = 0.0
 
     for uploaded_file in uploaded_files:
-        ore_mensili = 0.0
+        ore_file = 0.0
+        nome_mese = uploaded_file.name
+        
         with pdfplumber.open(uploaded_file) as pdf:
             for page in pdf.pages:
                 table = page.extract_table()
-                if table:
-                    for row in table:
-                        # Identifica le colonne orario (solitamente indice 1 e 2)
-                        ora_in = str(row[1]).strip() if len(row) > 1 else ""
-                        ora_fi = str(row[2]).strip() if len(row) > 2 else ""
-                        
-                        if ":" in ora_in and ":" in ora_fi and ora_in != "00:00":
-                            durata = calcola_durata(ora_in, ora_fi)
-                            ore_mensili += durata
-        
-        totale_generale += ore_mensili
-        h = int(ore_mensili)
-        m = int((ore_mensili - h) * 60)
-        report_finale.append({"File": uploaded_file.name, "Totale Ore": f"{h}h {m}m"})
+                if not table: continue
+                
+                for row in table:
+                    # Filtriamo le righe: cerchiamo orari nelle prime 3 colonne
+                    # Spesso l'orario è in row[1] e row[2] o row[1] contiene entrambi
+                    candidato_in = pulisci_orario(row[1]) if len(row) > 1 else None
+                    candidato_fi = pulisci_orario(row[2]) if len(row) > 2 else None
+                    
+                    if candidato_in and candidato_fi:
+                        durata = calcola_durata(candidato_in, candidato_fi)
+                        ore_file += durata
 
-    st.table(pd.DataFrame(report_finale))
+        h_mese = int(ore_file)
+        m_mese = int((ore_file - h_mese) * 60)
+        dati_finali.append({"File": nome_mese, "Ore Decimali": round(ore_file, 2), "Formato H:M": f"{h_mese}h {m_mese}m"})
+        totale_generale_ore += ore_file
+
+    # Visualizzazione Risultati
+    df = pd.DataFrame(dati_finali)
+    st.subheader("Riepilogo per Mese")
+    st.table(df)
+
+    # Calcolo Totale Finale
+    tg_h = int(totale_generale_ore)
+    tg_m = int((totale_generale_ore - tg_h) * 60)
     
-    tg_h = int(totale_generale)
-    tg_m = int((totale_generale - tg_h) * 60)
-    st.metric("TOTALE COMPLESSIVO", f"{tg_h} ore e {tg_m} minuti")
+    st.divider()
+    c1, c2 = st.columns(2)
+    c1.metric("ORE TOTALI COMPLESSIVE", f"{tg_h}h {tg_m}m")
+    
+    # Bottone per Scaricare Excel
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Ore_Lavorate')
+    
+    st.download_button(
+        label="📥 Scarica Report Excel",
+        data=output.getvalue(),
+        file_name="riepilogo_ore_massaro.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
