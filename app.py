@@ -26,7 +26,7 @@ def calcola_ore_decimali(ora_in, ora_fi):
         return 0.0
 
 st.set_page_config(page_title="Gestione Ore Massaro", layout="wide")
-st.title("📊 Calcolo Ore con Gestione Righe Multiple")
+st.title("📊 Calcolo Ore di Sfruttamento")
 
 uploaded_files = st.file_uploader("Carica i PDF", accept_multiple_files=True, type=['pdf'])
 
