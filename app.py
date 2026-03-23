@@ -31,7 +31,7 @@ def calcola_durata(inizio, fine):
         return 0.0
 
 st.set_page_config(page_title="Calcolo Ore Militari", layout="wide")
-st.title("🛩️ Estrattore Ore Lavorative Massaro")
+st.title("🛩️ Estrattore Ore Lavorative")
 st.write("Carica i tuoi specchi riepilogativi PDF per un calcolo esatto.")
 
 uploaded_files = st.file_uploader("Trascina qui i file PDF", accept_multiple_files=True, type=['pdf'])
